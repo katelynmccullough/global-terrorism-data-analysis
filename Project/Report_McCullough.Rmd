@@ -1,0 +1,541 @@
+---
+title: "Statistical Analysis of Global Terrorism Patterns"
+author: "Katelyn McCullough"
+output: 
+  rmdformats::readthedown
+---
+
+```{r}
+#Libraries
+library(tidyverse)
+library(ggcorrplot)
+library(caret)
+library(glmnet)
+library(ISLR2)
+library(leaps)
+library(MASS)
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+library(xgboost)
+library(e1071)
+```
+
+# Summary
+  This project uses the GTD Global Terrorism Database, which contains data on terrorist attacks worldwide from 1970 to 2020. The original dataset includes 209,706 observations and 135 variables. For this analysis, the dataset was reduced to 45 variables by selecting those that showed at least a ±0.05 correlation with either latitude or longitude. This filtering step was used to focus on variables that have geographic relevance, since location is a central component of the analysis.
+
+  The project applies both supervised and unsupervised learning methods to better understand patterns in the data. Supervised models are used to predict whether an attack is successful, while unsupervised clustering is used to examine how attacks group geographically. Special attention is given to handling missing data and class imbalance, which are two major challenges in this dataset. Overall, the goal is to build models that not only perform well, but also provide meaningful insight into how terrorist activity is distributed and influenced by different factors.
+
+# Purpose
+  The purpose of this project is to better understand patterns in global terrorist activity and evaluate how well different machine learning models can predict attack outcomes. Specifically, the analysis focuses on whether an attack is successful and how geographic location influences patterns in the data.
+    
+  The main questions being addressed are:
+  ---
+  - Can terrorist attack success be predicted using available features in the dataset?
+  - How does class imbalance affect model performance?
+  - Which machine learning models perform best for this type of data?
+  - Are there clear geographic patterns in where attacks occur?
+
+  This analysis is important because understanding patterns in terrorist activity can help identify trends that may not be immediately obvious. The results could be useful for researchers, analysts, or policymakers who are interested in risk patterns, geographic clustering, or predictive modeling in security-related data. Additionally, the project highlights practical challenges in real-world data, such as missing values and imbalanced classes, and demonstrates how different modeling approaches handle those issues.
+
+# Data
+  The dataset used in this project is the Global Terrorism Database (GTD), which contains detailed information on terrorist events from 1970 to 2020. The original dataset includes 209,706 observations and 135 variables covering geographic, operational, and contextual details of each attack.
+
+  To make the dataset more manageable and relevant to the analysis, it was filtered down to 45 variables. Variables were selected based on having at least a ±0.05 correlation with either latitude or longitude, ensuring that the remaining features had some geographic significance. The final dataset maintains all 209,706 observations while focusing on the most relevant variables.
+
+ Only numeric variables were used in the analysis. Character variables were removed because they were not necessary, and most had corresponding numeric-coded versions that preserved the same information. Additionally, the dataset uses -99 as a placeholder for missing values, so these were converted to NA for proper handling during analysis.
+
+ Missing data is a significant characteristic of this dataset, with many observations containing at least one missing value. Instead of removing all incomplete rows, missing values were handled separately for each model to preserve as much data as possible. This approach allowed for more flexibility and better use of the available information.
+
+ A data dictionary was also created to describe each variable, including its name, meaning, type, and example values. This ensures clarity and helps support the interpretation of the results throughout the analysis.
+### Data Dictionary
+```{r}
+# Data Dictionary
+data_dictionary <- data.frame(
+  Variable = c(
+    "eventid","iyear","country","region","latitude","longitude","doubtterr","success",
+    "suicide","attacktype2","attacktype3","targtype2","targsubtype2","natlty2","natlty3",
+    "guncertain1","guncertain2","nperps","claim2","claimmode2","claim3","claimmode3",
+    "weapsubtype1","weapsubtype2","weaptype3","weapsubtype3","weaptype4","weapsubtype4",
+    "property","nhours","ransomamt","ransomamtus","INT_LOG","INT_IDEO","INT_MISC",
+    "specificity","guncertain3","individual","nperpcap","claimmode","propextent",
+    "ransom","ransompaidus","hostkidoutcome","INT_ANY"
+  ),
+  Description = c(
+    "Unique event ID",
+    "Year of event",
+    "Country code",
+    "Region code",
+    "Latitude of event",
+    "Longitude of event",
+    "Doubt terrorism flag",
+    "Attack success flag",
+    "Suicide attack flag",
+    "Secondary attack type",
+    "Tertiary attack type",
+    "Secondary target type",
+    "Secondary target subtype",
+    "Second nationality",
+    "Third nationality",
+    "Uncertain group 1",
+    "Uncertain group 2",
+    "Number of perpetrators",
+    "Second claim of responsibility",
+    "Second claim mode",
+    "Third claim",
+    "Third claim mode",
+    "Weapon subtype 1",
+    "Weapon subtype 2",
+    "Weapon type 3",
+    "Weapon subtype 3",
+    "Weapon type 4",
+    "Weapon subtype 4",
+    "Property damage",
+    "Duration in hours",
+    "Ransom amount",
+    "Ransom amount USD",
+    "International logistics",
+    "International ideology",
+    "International misc",
+    "Location specificity",
+    "Uncertain group 3",
+    "Individual attack",
+    "Perpetrators captured",
+    "Claim mode",
+    "Property extent",
+    "Ransom flag",
+    "Ransom paid USD",
+    "Hostage outcome",
+    "Any international involvement"
+  ),
+  Type = c(
+    "numeric","numeric","categorical","categorical","numeric","numeric","categorical","categorical",
+    "categorical","categorical","categorical","categorical","categorical","categorical","categorical",
+    "categorical","categorical","numeric","categorical","categorical","categorical","categorical",
+    "categorical","categorical","categorical","categorical","categorical","categorical",
+    "categorical","numeric","numeric","numeric","categorical","categorical","categorical",
+    "numeric","categorical","categorical","numeric","categorical","categorical",
+    "categorical","numeric","categorical","categorical"
+  ),
+  Example = c(
+    "197001000001","2015","217","10","34.5","-118.2","0","1",
+    "0","3","0","2","22","217","217",
+    "0","1","4","1","2","0","1",
+    "12","23","6","31","7","42",
+    "1","5","100000","100000","0","1","0",
+    "1","0","1","2","3","2",
+    "1","50000","3","1"
+  ),
+  stringsAsFactors = FALSE
+)
+data_dictionary
+```
+
+# Exploration
+## Raw Data
+```{r}
+RawGlobalTerrorism <- read.csv('/Users/katelynmccullough/Library/CloudStorage/OneDrive-FloridaPolytechnicUniversity/Florida Polytechnic University/Classes/Statistical Learning/GlobalTerrorismProjectData.csv')
+```
+
+```{r}
+head(RawGlobalTerrorism, 5)
+```
+
+## Data Cleaning
+```{r}
+numeric_data <- RawGlobalTerrorism[, sapply(RawGlobalTerrorism, is.numeric)]
+```
+
+```{r}
+# Correlation with Latitude
+cor_lat <- cor(numeric_data, use = "pairwise.complete.obs")[, "latitude"]
+cor_lat_filtered <- cor_lat[abs(cor_lat) > 0.05]
+sort(cor_lat_filtered, decreasing = TRUE)
+lat_vars <- names(cor_lat[abs(cor_lat) > 0.05])
+```
+This step analyzes the correlation between latitude and all other numeric variables using pairwise complete observations. Variables were filtered to include only those with an absolute correlation greater than 0.05, reducing the dataset to the most relevant features. The results show that longitude has the strongest relationship with latitude, followed by variables such as region and claim3, while most remaining variables exhibit relatively weak correlations, indicating limited geographic association.
+
+```{r}
+# Correlation with Longitude
+cor_long <- cor(numeric_data, use = "pairwise.complete.obs")[, "longitude"]
+cor_long_filtered <- cor_long[abs(cor_long) > 0.05]
+sort(cor_long_filtered, decreasing = TRUE)
+long_vars <- names(cor_long[abs(cor_long) > 0.05])
+long_vars
+```
+This step analyzes the correlation between longitude and all other numeric variables using pairwise complete observations. Variables were filtered to include only those with an absolute correlation greater than 0.05, narrowing the set to the most relevant features. The results show that eventid has the strongest relationship with longitude, followed by year and region. Additionally, latitude shows a weaker relationship with longitude compared to the relationship between longitude and latitude, indicating an asymmetry in their correlations.
+
+```{r}
+vars_to_use <- union(lat_vars, long_vars)
+vars_to_use
+vars_to_use <- union(vars_to_use, c("latitude", "longitude"))
+```
+This step identifies all variables that are significantly correlated with either latitude or longitude, with duplicate variables removed. This results in a final set of 45 variables considered significant for the analysis.
+
+```{r}
+filteredGlobalTerrorism <- RawGlobalTerrorism[, vars_to_use]
+```
+This step creates a filtered dataset by selecting only the variables identified as significant, resulting in a refined dataset that includes the most relevant features for analysis.
+
+```{r}
+cor_lat <- cor(filteredGlobalTerrorism, use = "pairwise.complete.obs")[, "latitude"]
+top_vars <- names(sort(abs(cor_lat), decreasing = TRUE)[1:10])
+filteredcor_small <- cor(filteredGlobalTerrorism[, top_vars], 
+                         use = "pairwise.complete.obs")
+ggcorrplot(filteredcor_small,
+           colors = c("purple", "white", "pink"),
+           lab = FALSE)
+```
+This correlation map highlights the strongest relationships among the selected variables. Latitude and longitude show a moderate positive correlation, which is expected based on geographic location. Region also appears positively associated with longitude, suggesting certain regions cluster geographically. Claim3 shows a noticeable positive relationship with weaptype4, while natlty2 and natlty3 appear moderately positively correlated. Several attack type and weapon subtype variables show mild negative correlations with latitude and with each other, indicating some inverse patterns across locations or event characteristics. Overall, most correlations are weak to moderate, with only a few variable pairs showing stronger associations.
+
+```{r}
+cor_success <- cor(filteredGlobalTerrorism, use = "pairwise.complete.obs")[, "success"]
+top_vars <- names(sort(abs(cor_lat), decreasing = TRUE)[1:10])
+filteredcor_small <- cor(filteredGlobalTerrorism[, top_vars], 
+                         use = "pairwise.complete.obs")
+ggcorrplot(filteredcor_small,
+           colors = c("purple", "white", "pink"),
+           lab = FALSE)
+```
+This correlation map displays the strongest relationships among success and the selected predictor variables. Success appears to have weak correlations with most variables, suggesting no single feature strongly determines whether an event was successful. Claim3 shows a moderate positive relationship with weapsubtype4 and mild negative relationships with iyear and eventid. Eventid and iyear are strongly positively correlated, which is expected since event IDs often increase over time. Weapsubtype3 and weaptype3 also show a noticeable positive association, indicating those weapon classifications may commonly occur together. Latitude has mostly weak relationships with the other variables, with a slight positive correlation with weaptype3. Overall, most relationships are weak to moderate, indicating that success is likely influenced by multiple factors rather than one strongly correlated variable.
+
+## Filtered Data
+```{r}
+head(filteredGlobalTerrorism)
+```
+This represents the final filtered dataset that will be used for the analysis.
+
+## Dimensions
+```{r}
+dim(filteredGlobalTerrorism)
+```
+
+## Summary Statistics
+### Histogram of latitude
+```{r}
+ggplot(filteredGlobalTerrorism, aes(x = latitude)) +
+  geom_histogram(bins = 50, fill = "pink", color = "purple") +
+  theme_minimal() +
+  ggtitle("Histogram of Latitude")
+```
+The histogram of latitude shows that terrorist attacks are heavily concentrated in the Northern Hemisphere, with the highest density of observations occurring between approximately 20 and 40 degrees latitude. There is a noticeable peak around 25 to 30 degrees, indicating that many events occur within this range. In contrast, relatively few attacks are observed in the Southern Hemisphere, as shown by the sparse distribution of values below zero. Overall, the distribution is right-skewed toward positive latitude values, highlighting a strong geographic concentration of attacks in northern regions.
+
+### Histogram of Longitude
+```{r}
+ggplot(filteredGlobalTerrorism, aes(x = longitude)) +
+  geom_histogram(bins = 50, fill = "pink", color = "purple") +
+  theme_minimal() +
+  ggtitle("Histogram of Longitude")
+```
+ The histogram of longitude shows that terrorist attacks are concentrated primarily in the Eastern Hemisphere, with the highest density of observations occurring between approximately 20 and 100 degrees longitude. There is a noticeable peak around 40 to 60 degrees, indicating a strong clustering of events in that region. In contrast, fewer attacks are observed at extreme negative longitudes, though there is a smaller concentration around -100 degrees. Overall, the distribution suggests that terrorist activity is not evenly spread globally but is instead concentrated in specific geographic regions, with several areas showing very low levels of activity.
+
+### Scatterplot of Latitude and Longitude, by region
+```{r}
+ggplot(filteredGlobalTerrorism,
+       aes(x = longitude, y = latitude, color = factor(region))) +
+  geom_point(alpha = 0.2) +
+  theme_minimal() +
+  ggtitle("Geographic Distribution of Terrorist Attacks (1970–2020)") +
+  labs(color = "Region")
+```
+This scatter plot shows the geographic distribution of terrorist attacks using longitude and latitude, with points colored by region. The visualization reveals clear geographic clustering, where points naturally form shapes that resemble real-world continents and regions. Areas with darker concentrations of points indicate regions with higher frequencies of attacks, while lighter areas represent lower activity. Overall, the plot highlights that terrorist activity is not randomly distributed, but instead concentrated in specific geographic regions, reinforcing the importance of location in the analysis.
+
+### Number of attacks by region
+```{r}
+table(filteredGlobalTerrorism$region)
+```
+ This table displays the number of terrorist attacks by region. Region 10, which includes parts of North Africa, the Middle East, and Southern Europe, has the highest number of recorded attacks. It is followed by Region 6, which also shows a high concentration of activity. In contrast, Regions 4, 7, and 12 have significantly fewer recorded attacks, indicating relatively low levels of activity in those areas. Overall, the distribution of attacks varies greatly by region, with a few regions accounting for the majority of events.
+
+### Summary for Data
+```{r}
+summary(filteredGlobalTerrorism[, c(
+  "latitude",
+  "longitude",
+  "iyear",
+  "nperps",
+  "ransomamt",
+  "success"
+)])
+```
+This table presents summary statistics for key variables in the dataset. Latitude and longitude values fall within expected geographic ranges, with most observations concentrated in the Northern and Eastern Hemispheres. The year variable spans from 1970 to 2020, with a higher concentration of observations in more recent years, likely reflecting improvements in reporting over time. The number of perpetrators variable contains many placeholder values of -99, indicating missing or unknown data, which heavily skews the mean and limits its interpret ability. Similarly, the ransom amount variable has a large number of missing values, with only a small portion of observations containing actual ransom data. Among those, values vary widely, ranging from relatively small amounts to extremely large outliers, resulting in a highly skewed distribution. The success variable shows that the majority of attacks are classified as successful, indicating a strong class imbalance in the dataset.
+
+### Bar Plot of Attack Success
+```{r}
+ggplot(filteredGlobalTerrorism, aes(x = factor(success))) +
+  geom_bar(fill = "pink", color = "purple") +
+  theme_minimal() +
+  ggtitle("Distribution of Attack Success") +
+  xlab("Success (0 = No, 1 = Yes)") +
+  ylab("Count")
+```
+This bar chart shows the distribution of the success variable. The majority of terrorist attacks are classified as successful, with significantly more observations in the “1” category compared to “0.” This confirms that the dataset is highly imbalanced, which is important because it can impact model performance and lead to biased predictions toward the majority class.
+
+Overall, the dataset is relatively clean, but it does contain a substantial number of missing values across several variables. In addition, all data from 1993 is missing due to a reported data loss during an office move.
+
+# Methodology
+
+## Logistic Regression
+```{r}
+data <- filteredGlobalTerrorism
+data[data == -99] <- NA
+data <- data[!is.na(data$success), ]
+data$success <- as.factor(data$success)
+table(data$success)
+```
+This code chunk prepares the dataset for logistic regression. A copy of the dataset is created so it can be modified specifically for this model. All values of -99 are replaced with NA since they represent missing data. Rows with missing values in the success variable are removed because logistic regression requires a complete target variable. The success variable is then converted to a factor so it is treated as a binary classification in R. A frequency table is used to examine the distribution of the target variable, revealing that there are significantly more successful attacks than unsuccessful ones, which may create challenges for the model due to class imbalance.
+
+```{r}
+set.seed(7245)
+trainIndex <- createDataPartition(data$success, p = 0.7, list = FALSE)
+train_data <- data[trainIndex, ]
+test_data <- data[-trainIndex, ]
+```
+This code chunk splits the dataset into training and testing sets. A 70 30 split is used, where 70 percent of the observations are assigned to the training set and the remaining 30 percent are assigned to the testing set.
+
+```{r}
+data$success_num <- as.numeric(as.character(data$success))
+cor_success <- cor(data[, sapply(data, is.numeric)], use = "pairwise.complete.obs")[, "success_num"]
+success_vars <- names(cor_success[abs(cor_success) > 0.05])
+success_vars <- setdiff(success_vars, c("success_num", "eventid"))
+good_vars <- success_vars[colSums(is.na(data[, success_vars])) < 0.5 * nrow(data)]
+vars <- c("success", good_vars)
+train_data <- train_data[, vars]
+test_data  <- test_data[, vars]
+train_data <- na.omit(train_data)
+test_data  <- na.omit(test_data)
+vars
+dim(train_data)
+dim(test_data)
+```
+This code chunk selects predictor variables for the logistic regression based on their relationship with the success variable. A numeric version of success is created to allow for correlation calculations, and variables with an absolute correlation greater than 0.05 are selected. The variable eventid is removed since it is only an identifier and does not provide predictive value. From this set, only variables with less than 50 percent missing values are retained. The training and testing datasets are then restricted to these selected variables, and any remaining incomplete rows are removed. The final output shows the variables included in the model as well as the dimensions of the cleaned training and testing datasets.
+
+```{r}
+model_log <- glm(success ~ ., data = train_data, family = "binomial")
+```
+This code fits a logistic regression model using the training data. Logistic regression is used because the success variable is binary, making it appropriate for classification.
+
+```{r}
+prob_log <- predict(model_log, newdata = test_data, type = "response")
+pred_log <- ifelse(prob_log > 0.5, "1", "0")
+pred_log <- factor(pred_log, levels = levels(test_data$success))
+confusionMatrix(pred_log, test_data$success)
+```
+This code chunk uses the fitted logistic regression model to generate predicted probabilities on the testing dataset. These probabilities are then converted into class predictions using a threshold of 0.5. The predictions are compared to the actual values using a confusion matrix to evaluate model performance.
+
+The results show that the model achieved an overall accuracy of 88.35%; however, this is equal to the no information rate, indicating that the model is not performing better than simply predicting the majority class. The confusion matrix reveals that the model predicted only the “1” class and failed to identify any instances of the “0” class. As a result, the sensitivity is 0, and the model does not effectively distinguish between the two classes. This demonstrates that the logistic regression model performs poorly for this dataset due to the strong class imbalance in the success variable and is not a suitable model in its current form.
+
+## Random Forest
+    
+Random Forest is an ensemble learning method that builds multiple decision trees using different random subsets of the data and predictor variables. Each tree makes its own prediction, and the final result is determined by majority voting across all trees. This approach helps reduce overfitting and improves overall model accuracy by combining many weaker models into a stronger, more stable one.
+
+```{r}
+# model_rf <- train(
+#   success ~ .,
+#   data = train_data,
+#   method = "rf",
+#   trControl = trainControl(method = "cv", number = 5),
+#   importance = TRUE
+# )
+
+model_rf <- readRDS("model_rf.rds")
+model_rf
+```
+This code loads a previously trained Random Forest model and displays its performance results. The model was trained using 126,191 observations and 6 predictor variables, with performance evaluated using 5-fold cross-validation. Different values of the mtry parameter were tested, which controls the number of variables considered at each split. The optimal model was selected based on the highest accuracy, resulting in a final choice of mtry = 2.
+
+```{r}
+pred_rf <- predict(model_rf, newdata = test_data)
+
+confusionMatrix(pred_rf, test_data$success)
+```
+This code uses the Random Forest model to generate predictions on the testing dataset and evaluates performance using a confusion matrix. The model achieved an accuracy of 89.14%, which is slightly higher than the no information rate of 88.35%, indicating some improvement over predicting only the majority class. Unlike the logistic regression model, the Random Forest model was able to predict both classes and correctly identify some instances of the minority class. However, the sensitivity remains low at approximately 10.5%, showing limited ability to detect unsuccessful attacks. The Kappa statistic of 0.159 suggests modest predictive power beyond random chance, and the balanced accuracy of approximately 0.55 indicates some improvement in performance across both classes. Overall, the Random Forest model performs better than the logistic regression model but still struggles with class imbalance.
+
+```{r}
+# Saved so i dont have to rerun
+saveRDS(model_rf, "model_rf.rds")
+```
+
+## Regularized Logistic Regression with LASSO
+
+Regularized logistic regression with LASSO is a variation of logistic regression that includes a penalty term to reduce overfitting and improve model performance. The LASSO penalty shrinks some coefficients toward zero and can completely remove less important variables, effectively performing variable selection. This helps simplify the model and focus on the most relevant predictors while handling multicollinearity and improving generalization.
+
+```{r}
+ctrl_rf_bal <- trainControl(
+  method = "cv",
+  number = 3,
+  sampling = "up"
+)
+```
+
+ This code defines the training control settings for a Random Forest model using cross-validation and up-sampling. A 3-fold cross-validation approach is used to evaluate model performance, and up-sampling is applied to address class imbalance by increasing the representation of the minority class in the training data.
+
+```{r}
+set.seed(7245)
+
+# model_rf_bal <- train(
+#   success ~ .,
+#   data = train_data,
+#   method = "rf",
+#   trControl = ctrl_rf_bal,
+#   ntree = 200,
+#   tuneLength = 3
+# )
+
+model_rf_bal <- readRDS("model_rf_bal.rds")
+model_rf_bal
+```
+This code loads a Random Forest model that was trained using cross-validation and up-sampling to address class imbalance. The model was built using 126,191 observations and 6 predictor variables, with performance evaluated using 3-fold cross-validation. Up-sampling was applied during training to improve the model’s ability to learn from the minority class. Different values of the mtry parameter were tested, and the final model selected mtry = 4 based on the highest accuracy.
+
+```{r}
+pred_rf_bal <- predict(model_rf_bal, newdata = test_data)
+
+confusionMatrix(pred_rf_bal, test_data$success)
+```
+This code uses the balanced Random Forest model to generate predictions on the testing dataset and evaluates performance using a confusion matrix. The model achieved an accuracy of 82.95%, which is lower than the previous Random Forest model but expected due to the use of up-sampling. This approach improves the model’s ability to detect the minority class, as shown by the increase in sensitivity to approximately 42.1%, meaning a much higher proportion of unsuccessful attacks are correctly identified. The Kappa statistic increases to 0.27, indicating stronger predictive performance beyond random chance, and the balanced accuracy improves to approximately 0.65, reflecting better performance across both classes. Overall, this model provides the best performance so far, as it more effectively addresses the issue of class imbalance.
+
+```{r}
+saveRDS(model_rf_bal, "model_rf_bal.rds")
+```
+
+## XGBoost
+
+XGBoost is a machine learning algorithm that builds decision trees sequentially, where each new tree focuses on correcting the errors made by the previous ones. It improves accuracy by combining many weak models into a stronger overall model. Additionally, it incorporates techniques such as regularization and weighting to handle complex data and reduce overfitting.
+
+```{r}
+x_train <- data.matrix(train_data[, -1])
+y_train <- ifelse(train_data$success == "1", 1, 0)
+
+x_test <- data.matrix(test_data[, -1])
+y_test <- test_data$success
+```
+ This code prepares the data for the XGBoost model by converting the training and testing datasets into matrix format, which is required for the algorithm. The predictor variables are separated from the target variable, and the success variable is converted into a binary numeric format, with 1 representing a successful attack and 0 representing an unsuccessful attack.
+
+```{r}
+dtrain <- xgb.DMatrix(data = x_train, label = y_train)
+dtest  <- xgb.DMatrix(data = x_test)
+scale_pos_weight <- sum(y_train == 0) / sum(y_train == 1)
+```
+ This code converts the training and testing data into DMatrix format, which is optimized for use with XGBoost. It also calculates the scale_pos_weight parameter, which is used to adjust for class imbalance by giving more weight to the minority class during model training.
+
+```{r}
+set.seed(7245)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  max_depth = 4,
+  eta = 0.1,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  scale_pos_weight = scale_pos_weight
+)
+
+model_xgb <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 100,
+  verbose = 0
+)
+
+model_xgb
+```
+This code defines the parameters for the XGBoost model and trains it using the prepared training data. The model is set up for binary classification using logistic loss, with parameters such as max_depth controlling tree complexity and eta controlling the learning rate. Subsampling is used to reduce overfitting by training on random subsets of the data, and scale_pos_weight is included to account for class imbalance. The model is trained over 100 boosting rounds, where each round builds a new tree to improve upon the previous ones.
+
+```{r}
+prob_xgb <- predict(model_xgb, dtest)
+
+pred_xgb <- ifelse(prob_xgb > 0.5, "0", "1")
+pred_xgb <- factor(pred_xgb, levels = levels(test_data$success))
+
+confusionMatrix(pred_xgb, test_data$success)
+```
+This code uses the XGBoost model to generate predicted probabilities on the testing dataset, converts them into class predictions using a 0.5 threshold, and evaluates performance using a confusion matrix. The model achieved an accuracy of 30.18%, which is significantly lower than the no information rate of 88.35%. The negative Kappa value indicates that the model performs worse than random chance.
+
+While the model is able to identify some instances of the minority class, it misclassifies a large number of successful attacks, leading to poor overall performance. This is likely due to overcompensation for class imbalance, as the use of weighting caused the model to predict too many observations as unsuccessful. Although class weighting can improve detection of the minority class, excessive adjustment can reduce overall model effectiveness. Compared to the balanced Random Forest model, XGBoost does not perform well for this dataset.
+
+## Unsupervised K means clustering
+
+Unsupervised K means clustering is a method used to group data points based on similarity without using any predefined labels or outcomes. In this project, it is applied to latitude and longitude to group terrorist attacks based on their geographic proximity. The algorithm partitions the data into a specified number of clusters by minimizing the distance between points within each cluster, effectively creating data-driven geographic groupings rather than relying on predefined regions.
+
+```{r}
+unsup_data2 <- filteredGlobalTerrorism[, c("latitude", "longitude")]
+unsup_data2 <- na.omit(unsup_data2)
+unsup_scaled <- scale(unsup_data2)
+set.seed(7245)
+kmeans_model <- kmeans(unsup_scaled, centers = 12, nstart = 25)
+```
+This code prepares the data for K means clustering by selecting latitude and longitude, removing missing values, and standardizing the variables to ensure equal scaling. The K means algorithm is then applied with 12 clusters, using multiple random starting points to improve stability and reduce the likelihood of a poor local solution.
+
+```{r}
+cluster_plot <- cbind(unsup_data2, cluster = factor(kmeans_model$cluster))
+ggplot(cluster_plot, aes(x = longitude, y = latitude, color = cluster)) +
+  geom_point(alpha = 0.3) +
+  theme_minimal() +
+  ggtitle("K Means Clustering of Terrorist Attack Locations") +
+  labs(color = "Cluster")
+```
+ This code creates a visualization of the K means clustering results by combining the original latitude and longitude data with the assigned cluster labels. Each point on the scatter plot represents a terrorist attack location, and the color indicates which cluster it belongs to.
+
+The plot shows how the K means algorithm partitions the data into distinct geographic groupings based on proximity. Rather than following predefined regional boundaries, the clusters are formed purely based on spatial distance, illustrating how the algorithm defines its own regions from the data.
+
+```{r}
+wss <- numeric(12)
+set.seed(7245)
+for (i in 1:12) {
+  wss[i] <- kmeans(unsup_scaled, centers = i, nstart = 25)$tot.withinss
+}
+plot(1:12, wss, type = "b",
+     xlab = "Number of Clusters (k)",
+     ylab = "Within-Cluster Sum of Squares",
+     main = "Elbow Plot for K-Means Clustering")
+```
+This code calculates and visualizes the within-cluster sum of squares (WSS) for different values of k to help determine an appropriate number of clusters for the K means algorithm. The model is run multiple times with k ranging from 1 to 12, and the total within-cluster variation is recorded for each value.
+
+The resulting plot, known as an elbow plot, shows how WSS decreases as the number of clusters increases. The goal is to identify a point where the rate of decrease slows down, indicating that adding more clusters provides diminishing improvements. This point helps guide the selection of an appropriate number of clusters for the analysis.
+
+```{r}
+clustered_data <- filteredGlobalTerrorism[!is.na(filteredGlobalTerrorism$latitude) & 
+                                          !is.na(filteredGlobalTerrorism$longitude), ]
+
+clustered_data$cluster <- factor(kmeans_model$cluster)
+table(clustered_data$cluster, clustered_data$region)
+```
+This code creates a dataset that includes only observations with valid latitude and longitude values and assigns each observation to its corresponding K means cluster. A contingency table is then generated to compare the cluster assignments with the predefined region variable.
+
+The results show how observations from each region are distributed across the clusters. Some clusters are dominated by a single region, while others contain a mix of regions. This demonstrates that K means is grouping observations based on geographic proximity rather than predefined regional labels, creating its own data-driven groupings that may partially align with known regions but are not identical to them.
+
+```{r}
+ggplot(clustered_data, aes(x = cluster, fill = factor(region))) +
+  geom_bar(position = "fill") +
+  theme_minimal() +
+  labs(title = "Cluster vs Region Distribution",
+       x = "Cluster",
+       y = "Proportion",
+       fill = "Region")
+```
+   
+The clustering results are compared to the predefined region variable to evaluate how the K means algorithm groups observations. The bar chart shows the proportion of each region within each cluster, highlighting how observations are distributed across clusters. Many clusters are dominated by one or a small number of regions, while others contain a mix, indicating that the algorithm is grouping points based on geographic proximity rather than predefined boundaries.
+
+Overall, the results show that K means creates its own data driven geographic groupings that often resemble real world regions, but do not perfectly align with them. This suggests that terrorist activity is spatially concentrated, and that location alone is sufficient to form meaningful groupings in the data.
+
+# Conclusion
+This analysis demonstrates that both geographic factors and class imbalance play a major role in modeling terrorist activity. After filtering the dataset to focus on variables related to latitude and longitude, it becomes clear that location is one of the strongest underlying patterns in the data. The K means clustering results show that attacks are not randomly distributed, but instead form clear spatial groupings based solely on geographic proximity. While these clusters do not exactly match predefined regions, they highlight how the algorithm creates its own data-driven geographic structure, reinforcing the importance of spatial variables in understanding terrorist activity.
+
+From the supervised modeling results, class imbalance in the success variable was the most significant challenge. The logistic regression model performed poorly, predicting only the majority class and failing to identify any unsuccessful attacks. Although the model achieved high accuracy, this was misleading because it simply reflected the underlying class distribution.
+  
+The Random Forest model showed improvement by correctly predicting some instances of the minority class, but performance remained limited with low sensitivity. The most effective model was the balanced Random Forest, which used up-sampling to address class imbalance. This approach significantly improved the model’s ability to detect unsuccessful attacks, increasing sensitivity and balanced accuracy while maintaining reasonable overall performance. Although accuracy decreased, this reflected a more meaningful model that no longer relied on majority class predictions.
+
+In contrast, the XGBoost model performed poorly, likely due to overcompensation for class imbalance. The model placed too much emphasis on the minority class, resulting in a large number of misclassifications and a significant drop in overall accuracy. This highlights the importance of carefully tuning class imbalance techniques.
+
+Overall, the results show that handling class imbalance is more important than model complexity for this dataset. The balanced Random Forest model provided the most reliable performance, while the clustering analysis confirmed that geographic location is a key factor in understanding patterns of terrorist activity. Future work could focus on improving model performance through additional feature engineering, more advanced resampling techniques, or further tuning of ensemble models.
+
+# Discussion
+Overall, this project took more time than expected, especially when working with large datasets and computationally expensive models like Random Forest and XGBoost. One of the biggest challenges was dealing with class imbalance, which was not initially expected to have such a strong impact on model performance. The logistic regression results were especially surprising because the model appeared to perform well based on accuracy but completely failed when looking at other metrics.
+
+Another challenge was the runtime of the models. Training models like Random Forest required significant time, which led to saving models and reloading them instead of retraining. This helped with efficiency but also required additional planning.
+
+There were also some parts of the analysis that required rethinking, particularly the interpretation of K means clustering. Initially, the clusters were viewed as matching real-world regions, but it became clear that the algorithm is actually creating its own groupings based on distance rather than predefined boundaries.
+
+If this project were to be done again, better time management and earlier consideration of class imbalance would improve the overall workflow. Additionally, more time could be spent tuning models like XGBoost, which may perform better with more careful parameter adjustments. Overall, this project provided a better understanding of both machine learning models and the challenges of working with real-world data.
+
+# References 
+START (National Consortium for the Study of Terrorism and Responses to Terrorism). (2022). Global Terrorism Database 1970 - 2020 [data file]. https://www.start.umd.edu/gtd
